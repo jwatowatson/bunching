@@ -1,7 +1,15 @@
+# This function computes the parasite biomass profiles for a given set of PD parameters and PK profiles
+# drug_concentrations : N x Tmax matrix; N is number of subjects, Tmax is maximum number of days to forward simulate
+# log_EC_50 : log value of the EC50 parameter of PD model
+# log_k : log value of the slope parameter k in PD model
+# merozoite_release : days at which merozoites erupt from liver (start of blood stage infection)
+# patency_pcount : parasite biomass at which the infection becomes patent
+
+# This function returns parasite profiles : N x Tmax matrix
 compute_ParasiteProfiles = function(drug_concentrations,  
-                                  log_EC_50, log_k,
-                                  merozoite_release,
-                                  patency_pcount){
+                                    log_EC_50, log_k,
+                                    merozoite_release,
+                                    patency_pcount){
   N = length(merozoite_release)
   N_merozoites = 10000
   log_threshold = log(sqrt(0.1));

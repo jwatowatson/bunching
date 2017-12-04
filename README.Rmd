@@ -1,0 +1,17 @@
+---
+title: "README"
+author: "James Watson"
+date: "4 December 2017"
+output: html_document
+---
+
+
+## Estimating chloroquine in vivo MIC from VHX dataset
+
+VHX was a longitudinal study of vivax malaria patients along the Thailand-Myanmar border.
+We provide the fitted PK estimates of the CQ profiles, the time until relapse, and the parasite biomass at patency of recurrence.
+
+The full data analysis can be found in the *R* file *Fit_VHX_data.R*.
+
+
+

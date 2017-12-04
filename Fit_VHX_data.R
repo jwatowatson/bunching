@@ -1,131 +1,102 @@
-## Use the AS data to estimate the prior on the time of merozoite release ##
-rm(list=ls())
+# Load necessary R packages, these need to be installed beforehand with the function install.packages
 library(Rcpp)
 library(gplots)
 library(dplyr)
-library(boot)
 library(doParallel)
-setwd('D:/Dropbox/MORU/MICmalaria/Bunching/data/VHX study Maesot/')
-setwd("~/Dropbox/MORU/MICmalaria/Bunching/code")
-#Rcpp::sourceCpp('D:/Dropbox/MORU/MICmalaria/Bunching/code/compute_relapseTimes.cpp')
+library(compiler)
 
-source('~/Dropbox/MORU/MICmalaria/Bunching/code/functions.R', echo=TRUE)
-source('~/Dropbox/MORU/MICmalaria/Bunching/code/compute_relapseTimesR.R')
-source('~/Dropbox/MORU/MICmalaria/Bunching/code/compute_ParasiteProfile.R')
+# Source R code for fitting 
 
-pkdata = read.csv('~/Dropbox/MORU/MICmalaria/Bunching/data/VHX study Maesot/pk_data_cleaned.csv')
+source('functions.R')
+source('compute_relapseTimesR.R')
+source('compute_ParasiteProfile.R')
 
-hist(pkdata$timetorelapse, breaks = seq(0,400,by=1), xlim=c(0,100),
+pkdata = readxl::read_excel('VHX_PKPD_data.xlsx', sheet='VHX_PKPD_data')
+hist(pkdata$Time_until_Relapse, breaks = seq(0,60,by=1), xlim=c(0,60),
      main='Relapse times in CQ treated patients', xlab = 'days')
 
-# Only select patients with relapse before 60 days
-pkdata = filter(pkdata, timetorelapse<60)
-N = length(pkdata$timetorelapse)
+N = length(pkdata$Time_until_Relapse)
 
-# write_csv(x = pkdata[,c("log10pk","timetorelapse","theta_p","alpha1","alpha2","log10_beta","patency_pcount")], 
-#           path = 'D:/Dropbox/MORU/MICmalaria/Bunching/data/DataForModel.csv')
-
-ts = 0:150
+ts = 0:60
 rhos = t(apply(pkdata, 1, function(x) 10^biexp_f(ts, log10_beta = x['log10_beta'], 
                                                  p = x['theta_p'], alpha1 = x['alpha1'],
                                                  alpha2 = x['alpha2'])))
 
-data_XY = list(relapse_time = pkdata$timetorelapse, drug_concentrations=rhos,
-               patency_pcount = pkdata$patency_pcount)
+data_XY = list(relapse_time = pkdata$Time_until_Relapse, drug_concentrations=rhos,
+               patency_pcount = pkdata$Parasite_Biomass)
 
 data_XY$patency_pcount[is.na(data_XY$patency_pcount)] = 10^mean(log10(data_XY$patency_pcount),na.rm=T)
 
 #####################################################################################################################################
 #####################################################################################################################################
-K = 10^5
-# Run the approximation algorithm
-res=abc_simulation(K=K, data_XY = data_XY, random_gen = 'unif')
-res_weib=abc_simulation(K=K, data_XY = data_XY, random_gen = 'weibull')
-load('ABCsims_unifLatent.RData')
-load('ABCsims_weibullLatent.RData')
+
+
+# Run the approximation algorithm. This can be resource intensive (depending on K)
+K = 10^4
+res = abc_simulation(K=K, data_XY = data_XY, random_gen = 'unif')
+
+save(res, file = 'ABCsims_output.RData')
 
 
 #####################################################################################################################################
 #####################################################################################################################################
-load('ABCsims_unifLatent.RData')
-load('ABCsims_weibullLatent.RData')
+# Look at model output
 
-res = res_weib
-
+load('ABCsims_output.RData')
 K = length(res$scores)
 
-hist(res$scores)
+hist(res$scores, main='distance scores', xlab='Sum of L1 distance')
 ####
-pdf('~/Dropbox/MORU/MICmalaria/Bunching/code/ABC_algorithm_results.pdf')
+
+################################################################################################################
+################################################################################################################
+
 par(las=1, bty='n', mfrow=c(1,2))
-### Log k ###
-ind = res$scores > -2600
+
+# Choose nearest parameter set
+ind = res$scores > -3000
 sum(ind)/N
-# dens_log_k = kde2d(res$thetas$log_k[ind], res$scores[ind]/100)
-# contour(dens_log_k, nlevels = 15, labels = '',  ylab ='L1 score', xlab='log k')
-hist(res$thetas$log_k[ind], main='', xlab='log k', yaxt='n', ylab='', col='grey', freq = F)
-lines(seq(0,5,by=.1), dnorm(seq(0,5,by=.1), mean=1.9, sd=0.75), lwd=3, col='blue')
+
+###################################################### Log k #### 
+
+
+hist(res$thetas$log_k[ind], main='', xlab='log k', yaxt='n', ylab='', col='grey', freq = F, xlim=c(0,7))
+lines(seq(0,10,by=.1), dnorm(seq(0,10,by=.1), mean=1.5, sd=1.5), lwd=3, col='blue')
 abline(v=median(res$thetas$log_k[ind]), col='red', lwd=3, lty=2)
-# sm_av_k =wapply(x = res$thetas$log_k[ind], y = res$scores[ind]/100, fun = mean,
-#                 width = .05, n = 500)
-# lines(sm_av_k$x, sm_av_k$y, lwd=3,col='red')
-log_k_hat = median(res$thetas$log_k[ind])#sm_av_k$x[which.max(sm_av_k$y)]
+log_k_hat = median(res$thetas$log_k[ind])
 
-# bsresk = boot(data = cbind(res$thetas$log_k,res$scores/100),
-#               statistic = find_smooth_max, R = 200, 
-#               parallel = 'multicore', ncpus = 4)
-# abline(v=quantile(bsresk$t, probs = c(.025,.975)), col='red', lty=2,lwd=3)
-# legend('topleft', col='red',lty=c(1,2),lwd=3, bty='n',
-#        legend = c('Estimated expected score', '95% B.I. of maximum score'))
-
-### Log EC 50 #### 
-
-# densEC50 = kde2d(res$thetas$log_EC_50[ind], res$scores[ind]/100)
-# contour(densEC50, nlevels = 15, labels = '', ylab ='L1 score', xlab='log EC50')
-hist(res$thetas$log_EC_50[ind], main='', xlab='log EC50', yaxt='n', ylab='', col='grey',freq = F)
+###################################################### Log EC 50 #### 
+hist(res$thetas$log_EC_50[ind], main='', xlab='log EC50', yaxt='n', ylab='', col='grey',freq = F, xlim=c(3,8))
 abline(v=median(res$thetas$log_EC_50[ind]),col='red',lwd=3,lty=2)
-lines(seq(0,10,by=.1), dnorm(seq(0,10,by=.1), mean=5.5, sd=0.75), lwd=3, col='blue')
-# sm_avEC50=wapply(x = res$thetas$log_EC_50, y = res$scores/100, fun = mean,
-#                  width = .05, n = 500)
-# lines(sm_avEC50$x, sm_avEC50$y, lwd=3,col='red')
+lines(seq(0,10,by=.1), dnorm(seq(0,10,by=.1), mean=5.5, sd=1.5), lwd=3, col='blue')
 logEC50_hat = median(res$thetas$log_EC_50[ind])#sm_avEC50$x[which.max(sm_avEC50$y)]
 
-# bsresEC50 = boot(data = cbind(res$thetas$log_EC_50,res$scores/100),
-#                  statistic = find_smooth_max, R = 200, 
-#                  parallel = 'multicore', ncpus = 4)
-# abline(v=quantile(bsresEC50$t, probs = c(.025,.975)), col='red', lty=2,lwd=3)
-
-dev.off()
-
-# EC50s = seq(quantile(bsresEC50$t, probs = c(.025,.975))[1],
-#             quantile(bsresEC50$t, probs = c(.025,.975))[2], length.out = 100)
-# slopes = seq(quantile(bsresk$t, probs = c(.025,.975))[1],
-#              quantile(bsresk$t, probs = c(.025,.975))[2], length.out = 100)
-# mics = array(dim=c(100,100))
-# for(i in 1:100){
-#   for(j in 1:100){
-#     mics[i,j] = mic_inpute(logEC50 = EC50s[i], logk = slopes[j])
-#   }
-# }
-# range(mics)
 mic_hat = mic_inpute(logEC50 = logEC50_hat, logk = log_k_hat)
 exp(logEC50_hat)
 exp(log_k_hat)
 
+# Posterior credible intervals
+quantile(mic_inpute(logEC50 = res$thetas$log_EC_50[ind], logk = res$thetas$log_k[ind]), probs=c(0.025,.975))
+quantile(exp(res$thetas$log_EC_50[ind]), probs=c(0.1,.9))
+quantile(exp(res$thetas$log_k[ind]), probs=c(0.1,.9))
 
+
+
+
+############################################################################################################
 #### Plot the concentration-response curve ####
-pdf('~/Dropbox/MORU/MICmalaria/Bunching/code/CQ_MIC_results.pdf')
+############################################################################################################
 par(las=1,bty='n', mfrow=c(1,2))
 quantiles = log10(apply(rhos, 2, quantile, probs=c(.05,.5,.95)))
-plot(0:80, quantiles[2,1:81], type='l',lwd=3,yaxt='n',
-     ylab = 'CQ (ug/L)', xlab='days post treatment',
+plot(0:60, quantiles[2,], type='l',lwd=3,yaxt='n',
+     ylab = 'CQ concentration (ug/L)', xlab='Days post treatment',
      main='Fitted CQ concentrations', ylim=c(log(2),3))
 axis(2, at = c(1,2,3), labels = c(10,100,1000))
-lines(0:80, quantiles[1,1:81], type='l',lwd=2,lty=2)
-lines(0:80, quantiles[3,1:81], type='l',lwd=2,lty=2)
+lines(0:60, quantiles[1,], type='l',lwd=2,lty=2)
+lines(0:60, quantiles[3,], type='l',lwd=2,lty=2)
 abline(h=log10(mic_hat),col='red', lty=2,lwd=3)
-cross1 =  (0:80)[which.min(abs(log10(mic_hat) - quantiles[1,1:81]))]
-cross2 =  (0:80)[which.min(abs(log10(mic_hat) - quantiles[3,1:81]))]
+cross1 =  (0:60)[which.min(abs(log10(mic_hat) - quantiles[1,]))]
+cross2 =  (0:60)[which.min(abs(log10(mic_hat) - quantiles[3,]))]
 
 abline(v=c(cross1, cross2),lty=2)
 
@@ -153,7 +124,6 @@ lines(log10(c(500,500)),log10(c(1,EC50_hat)),col='red',lwd=3, lty=2)
 text(x = 2.3, y = 1, labels = expression('EC'[50]),lwd=3,col='black',cex=.8)
 
 
-dev.off()
 
 
 latent_vars = round(rtrunc(N, spec='weibull', b=(data_XY$relapse_time-6),
@@ -183,7 +153,9 @@ lines(density(data_XY$relapse_time),lwd=2,col='red')
 legend('topright', col=c('red','blue'), lwd=2, legend=c('Observed','Simulated'),bty='n')
 
 
-##### What happens if the MIC doubles?? ######
+##################################################################################################################################################################
+##### What happens if the MIC doubles?? ##################################################################################################################
+##################################################################################################################################################################
 par(mfrow=c(1,1))
 NNN = 20000
 ind_bb = sample(1:nrow(rhos), NNN, replace = T)
@@ -214,7 +186,9 @@ halfMIC_bunching = compute_relapse_TimesR(drug_concentrations = Large_trial,
                                           merozoite_release = latent_vars, 
                                           patency_pcount = parasites)
 
-pdf('DoublingMICchloroquine.pdf')
+
+
+
 par(bty='n',las=1)
 hist(data_XY$relapse_time, freq=F, breaks = seq(0, 60, by=2),
      main='Distribution of patent relapse times',
@@ -228,21 +202,9 @@ round(median(current_bunching,na.rm=T) - median(doubleMIC_bunching,na.rm=T))
 lines(density(doubleMIC_bunching[!is.na(doubleMIC_bunching)]), col='red',
       lwd=4, lty=2)
 
-lines(density(halfMIC_bunching[!is.na(halfMIC_bunching)]), col='blue',
-      lwd=4, lty=2)
-# relapse_GORDON_data = c(rep(4, 1),rep(5, 1),rep(6, 18),rep(7, 36),rep(8, 18),rep(9, 23))
-# hist(7*relapse_GORDON_data - 3.5, xlim=c(1, 12), freq=F, border = 'blue', add=T,
-#      breaks = seq(21,84,by=7), density = 10, angle=-30, lwd=3)
-# 
 
-legend('topleft', lwd=3, col=c('black','red','blue'), lty=c(1,2,2),
+legend('topleft', lwd=3, col=c('black','red'), lty=c(1,2,2), cex=1.1,
        legend = c('Predictions for estimated MIC', 
-                  'Predictions for 2 fold increase in MIC',
-                  'Predictions for 2 fold decrease in MIC'),bty='n')
-
-dev.off()
+                  'Predictions for 2 fold increase in MIC'),bty='n')
 
 
-relapse_GORDON_data = c(rep(4, 1),rep(5, 1),rep(6, 18),rep(7, 36),rep(8, 18),rep(9, 23))
-hist(7*relapse_GORDON_data - 3.5, xlim=c(1, 12), freq=F, col='blue', add=T)
-hist(data_XY$relapse_time/7, add=T, border='red',freq = F)
